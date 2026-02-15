@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Jump">
+<meta name="theme-color" content="#0a0e1a">
+<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxODAgMTgwIj48cmVjdCB3aWR0aD0iMTgwIiBoZWlnaHQ9IjE4MCIgcng9IjQwIiBmaWxsPSIjMGExMDJhIi8+PHRleHQgeD0iOTAiIHk9IjEyMCIgZm9udC1zaXplPSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPvCfppg8L3RleHQ+PC9zdmc+">
+<title>Jump Analyzer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  :root {
+    --bg: #0a0e1a;
+    --surface: #131829;
+    --surface2: #1a2035;
+    --border: #252d45;
+    --text: #e0e4f0;
+    --text2: #7a8299;
+    --text3: #4a5170;
+    --blue: #4a8eff;
+    --blue-dim: #2a4a80;
+    --green: #2dd881;
+    --green-dim: #1a5a3a;
+    --red: #ff5c5c;
+    --red-dim: #5a2020;
+    --gold: #ffc44a;
+    --gold-dim: #6a5020;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) 0;
+    overscroll-behavior: none;
+  }
+
+  .app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px 12px 100px;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+    padding: 8px 4px;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #fff;
+  }
+  .header .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--blue);
+    background: rgba(74,142,255,0.12);
+    padding: 3px 8px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ---- Tabs ---- */
+  .tabs {
+    display: flex;
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 3px;
+    margin-bottom: 16px;
+  }
+  .tab {
+    flex: 1;
+    padding: 10px 0;
+    border: none;
+    background: none;
+    color: var(--text2);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .tab.active {
+    background: var(--surface2);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .tab .count {
+    font-size: 10px;
+    background: var(--blue-dim);
+    color: var(--blue);
+    padding: 1px 6px;
+    border-radius: 8px;
+    margin-left: 4px;
+  }
+
+  /* ---- Card ---- */
+  .card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+  }
+  .card-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text3);
+    margin-bottom: 12px;
+  }
+
+  /* ---- Video ---- */
+  .video-box {
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .video-box video {
+    width: 100%;
+    display: block;
+    max-height: 50vh;
+    object-fit: contain;
+  }
+
+  /* ---- Frame display ---- */
+  .frame-display {
+    text-align: center;
+    padding: 8px 0;
+    margin-bottom: 8px;
+  }
+  .frame-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 36px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+  }
+  .frame-total {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+  .frame-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 4px;
+  }
+
+  /* ---- Scrubber ---- */
+  .scrubber-wrap {
+    position: relative;
+    padding: 8px 0;
+    margin-bottom: 4px;
+  }
+  .scrubber {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface2);
+    outline: none;
+  }
+  .scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--blue);
+    border: 3px solid var(--bg);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .marker {
+    position: absolute;
+    top: 4px;
+    width: 3px;
+    height: 14px;
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .marker.takeoff { background: var(--green); }
+  .marker.landing { background: var(--red); }
+
+  /* ---- Step buttons ---- */
+  .step-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .step-btn {
+    padding: 14px 0;
+    border: none;
+    border-radius: 10px;
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .step-btn:active { background: var(--border); }
+
+  /* ---- Mark buttons ---- */
+  .mark-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .mark-btn {
+    padding: 16px 12px;
+    border: 2px solid;
+    border-radius: 12px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+    line-height: 1.3;
+  }
+  .mark-btn.takeoff {
+    background: rgba(45,216,129,0.08);
+    border-color: var(--green-dim);
+    color: var(--green);
+  }
+  .mark-btn.takeoff:active {
+    background: rgba(45,216,129,0.2);
+  }
+  .mark-btn.takeoff.set {
+    background: rgba(45,216,129,0.15);
+    border-color: var(--green);
+  }
+  .mark-btn.landing {
+    background: rgba(255,92,92,0.08);
+    border-color: var(--red-dim);
+    color: var(--red);
+  }
+  .mark-btn.landing:active {
+    background: rgba(255,92,92,0.2);
+  }
+  .mark-btn.landing.set {
+    background: rgba(255,92,92,0.15);
+    border-color: var(--red);
+  }
+  .mark-frame {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 2px;
+  }
+
+  .clear-link {
+    display: block;
+    text-align: center;
+    background: none;
+    border: none;
+    color: var(--text3);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 8px;
+    text-decoration: underline;
+  }
+
+  /* ---- Results ---- */
+  .results {
+    background: linear-gradient(135deg, #0f1a33, var(--surface));
+    border: 1px solid var(--blue-dim);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .results-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--blue);
+    margin-bottom: 14px;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .stat {
+    background: rgba(0,0,0,0.25);
+    border-radius: 10px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .stat-value.highlight { color: var(--gold); font-size: 28px; }
+  .stat-label {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .stat.wide {
+    grid-column: 1 / -1;
+  }
+
+  /* ---- Log form ---- */
+  .log-form {
+    display: flex;
+    gap: 8px;
+  }
+  .log-input {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+  }
+  .log-input::placeholder { color: var(--text3); }
+  .log-input:focus { border-color: var(--blue-dim); }
+  .log-btn {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 10px;
+    background: var(--blue);
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .log-btn:active { opacity: 0.8; }
+
+  /* ---- Load button ---- */
+  .load-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .load-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 10px;
+    background: var(--blue);
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .load-btn:active { opacity: 0.8; }
+  .record-btn {
+    padding: 12px 18px;
+    border: 2px solid var(--gold-dim);
+    border-radius: 10px;
+    background: rgba(255,196,74,0.08);
+    color: var(--gold);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .record-btn:active { background: rgba(255,196,74,0.2); }
+  .slo-mo-tip {
+    background: rgba(255,196,74,0.1);
+    border: 1px solid var(--gold-dim);
+    border-radius: 10px;
+    padding: 10px 36px 10px 12px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--gold);
+    line-height: 1.5;
+    position: relative;
+  }
+  .tip-dismiss {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 4px;
+  }
+  .fps-select {
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+  }
+  .fps-label {
+    font-size: 13px;
+    color: var(--text2);
+    font-weight: 500;
+  }
+
+  /* ---- Empty state ---- */
+  .empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--text3);
+  }
+  .empty-icon { font-size: 40px; margin-bottom: 10px; }
+  .empty-text { font-size: 14px; line-height: 1.5; }
+
+  /* ---- Jump log list ---- */
+  .jump-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .jump-height {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+  }
+  .jump-height .unit { font-size: 14px; color: var(--text2); }
+  .jump-meta {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 3px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .jump-label {
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 2px;
+  }
+  .delete-btn {
+    background: none;
+    border: none;
+    color: var(--text3);
+    font-size: 22px;
+    cursor: pointer;
+    padding: 8px;
+    line-height: 1;
+  }
+  .delete-btn:active { color: var(--red); }
+
+  .log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .log-header h3 {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text3);
+  }
+  .clear-all-btn {
+    background: none;
+    border: none;
+    color: var(--text3);
+    font-size: 11px;
+    cursor: pointer;
+    text-decoration: underline;
+    font-family: inherit;
+  }
+
+  /* ---- Chart ---- */
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chart-wrap canvas {
+    display: block;
+  }
+
+  /* ---- Legend ---- */
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .legend-line {
+    width: 16px;
+    height: 2px;
+    border-radius: 1px;
+  }
+
+  /* ---- Daily breakdown ---- */
+  .day-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-date { color: var(--text2); }
+  .day-stats {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    text-align: right;
+  }
+  .day-best { color: var(--gold); }
+  .day-avg { color: var(--blue); }
+  .day-count { color: var(--text3); }
+  .day-sep { color: var(--text3); margin: 0 4px; }
+
+  /* Hidden file input */
+  #fileInput { display: none; }
+
+  /* Prevent double-tap zoom */
+  button, input, select { touch-action: manipulation; }
+
+  /* Confirmation toast */
+  .toast {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--green);
+    color: #000;
+    padding: 10px 24px;
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: 700;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+    z-index: 100;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- Header -->
+  <div class="header">
+    <h1>🦘 Jump Analyzer</h1>
+    <span class="badge">240 FPS</span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="analyze" onclick="switchTab('analyze')">Analyze</button>
+    <button class="tab" data-tab="log" onclick="switchTab('log')">Log <span class="count" id="logCount" style="display:none"></span></button>
+    <button class="tab" data-tab="trends" onclick="switchTab('trends')">Trends</button>
+  </div>
+
+  <!-- ============ ANALYZE TAB ============ -->
+  <div id="tab-analyze">
+    <div class="load-row">
+      <button class="load-btn" onclick="document.getElementById('fileInput').click()">Load Video</button>
+      <button class="record-btn" onclick="openCamera()">📷 Record</button>
+      <input type="file" id="fileInput" accept="video/*" onchange="handleFile(event)">
+      <span class="fps-label">FPS:</span>
+      <select class="fps-select" id="fpsSelect" onchange="changeFps()">
+        <option value="120">120</option>
+        <option value="240" selected>240</option>
+        <option value="480">480</option>
+        <option value="960">960</option>
+      </select>
+    </div>
+    <div class="slo-mo-tip" id="sloMoTip" style="display:none">
+      <span class="tip-dismiss" onclick="dismissTip()">×</span>
+      📱 Open your <strong>Camera app</strong> → swipe to <strong>SLO-MO</strong> → record your jump → come back here → tap <strong>Load Video</strong> to analyze.
+    </div>
+
+    <div id="videoArea" style="display:none">
+      <div class="video-box">
+        <video id="video" playsinline webkit-playsinline muted preload="auto"></video>
+      </div>
+
+      <div class="card">
+        <!-- Frame display -->
+        <div class="frame-display">
+          <div class="frame-num" id="frameNum">0</div>
+          <div class="frame-total">of <span id="totalFrames">0</span> frames</div>
+          <div class="frame-time" id="frameTime">0.0000s</div>
+        </div>
+
+        <!-- Scrubber -->
+        <div class="scrubber-wrap" id="scrubberWrap">
+          <input type="range" class="scrubber" id="scrubber" min="0" max="0" value="0" oninput="seekToFrame(Number(this.value))">
+        </div>
+
+        <!-- Step buttons -->
+        <div class="step-row">
+          <button class="step-btn" onclick="stepFrame(-10)">−10</button>
+          <button class="step-btn" onclick="stepFrame(-1)">−1</button>
+          <button class="step-btn" onclick="stepFrame(1)">+1</button>
+          <button class="step-btn" onclick="stepFrame(10)">+10</button>
+        </div>
+
+        <!-- Mark buttons -->
+        <div class="mark-row">
+          <button class="mark-btn takeoff" id="takeoffBtn" onclick="markTakeoff()">
+            ▲ TAKEOFF
+            <span class="mark-frame" id="takeoffLabel"></span>
+          </button>
+          <button class="mark-btn landing" id="landingBtn" onclick="markLanding()">
+            ▼ LANDING
+            <span class="mark-frame" id="landingLabel"></span>
+          </button>
+        </div>
+
+        <button class="clear-link" id="clearMarks" style="display:none" onclick="clearMarks()">Clear marks</button>
+      </div>
+
+      <!-- Results -->
+      <div class="results" id="resultsCard" style="display:none">
+        <div class="results-title">📐 Results</div>
+        <div class="stats-grid">
+          <div class="stat wide">
+            <div class="stat-value highlight" id="resultHeight">—</div>
+            <div class="stat-label">Vertical (inches)</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="resultHeightCm">—</div>
+            <div class="stat-label">CM</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="resultAirTime">—</div>
+            <div class="stat-label">Air Time</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="resultFrames">—</div>
+            <div class="stat-label">Frames</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" id="resultFps">—</div>
+            <div class="stat-label">FPS</div>
+          </div>
+        </div>
+        <div class="log-form">
+          <input type="text" class="log-input" id="labelInput" placeholder="Label (optional)">
+          <button class="log-btn" onclick="logJump()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="emptyAnalyze" class="empty">
+      <div class="empty-icon">🎬</div>
+      <div class="empty-text">Load a slo-mo video to<br>measure your vertical</div>
+      <div style="margin-top:16px;font-size:11px;color:var(--text3);line-height:1.6">
+        Record in <strong style="color:var(--text2)">Camera → Slo-Mo</strong> mode<br>
+        then come back and tap <strong style="color:var(--text2)">Load Video</strong>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LOG TAB ============ -->
+  <div id="tab-log" style="display:none">
+    <div id="logContent"></div>
+  </div>
+
+  <!-- ============ TRENDS TAB ============ -->
+  <div id="tab-trends" style="display:none">
+    <div id="trendsContent"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ======== STATE ========
+const GRAVITY_IN = 386.0886;
+let fps = 240;
+let currentFrame = 0;
+let totalFrames = 0;
+let duration = 0;
+let takeoffFrame = null;
+let landingFrame = null;
+let jumps = [];
+let videoLoaded = false;
+
+// ======== ELEMENTS ========
+const video = document.getElementById('video');
+const scrubber = document.getElementById('scrubber');
+
+// ======== STORAGE ========
+function loadJumps() {
+  try {
+    const data = localStorage.getItem('jump-analyzer-log');
+    if (data) jumps = JSON.parse(data);
+  } catch(e) {}
+  updateLogCount();
+}
+
+function saveJumps() {
+  try {
+    localStorage.setItem('jump-analyzer-log', JSON.stringify(jumps));
+  } catch(e) {}
+  updateLogCount();
+}
+
+function updateLogCount() {
+  const el = document.getElementById('logCount');
+  if (jumps.length > 0) {
+    el.textContent = jumps.length;
+    el.style.display = 'inline';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// ======== VIDEO ========
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  video.src = url;
+  video.load();
+  video.onloadedmetadata = () => {
+    duration = video.duration;
+    totalFrames = Math.floor(duration * fps);
+    scrubber.max = totalFrames;
+    scrubber.value = 0;
+    currentFrame = 0;
+    video.currentTime = 0;
+    video.pause();
+    videoLoaded = true;
+    takeoffFrame = null;
+    landingFrame = null;
+    clearResults();
+    updateFrameDisplay();
+    updateMarkerUI();
+    document.getElementById('videoArea').style.display = 'block';
+    document.getElementById('emptyAnalyze').style.display = 'none';
+    document.getElementById('totalFrames').textContent = totalFrames;
+  };
+}
+
+function changeFps() {
+  fps = Number(document.getElementById('fpsSelect').value);
+  document.querySelector('.badge').textContent = fps + ' FPS';
+  if (videoLoaded) {
+    totalFrames = Math.floor(duration * fps);
+    scrubber.max = totalFrames;
+    document.getElementById('totalFrames').textContent = totalFrames;
+    currentFrame = Math.min(currentFrame, totalFrames);
+    takeoffFrame = null;
+    landingFrame = null;
+    clearResults();
+    updateFrameDisplay();
+    updateMarkerUI();
+  }
+}
+
+function seekToFrame(frame) {
+  if (!videoLoaded) return;
+  frame = Math.max(0, Math.min(frame, totalFrames));
+  currentFrame = frame;
+  video.currentTime = frame / fps;
+  video.pause();
+  scrubber.value = frame;
+  updateFrameDisplay();
+  autoCalc();
+}
+
+function stepFrame(delta) {
+  seekToFrame(currentFrame + delta);
+}
+
+function updateFrameDisplay() {
+  document.getElementById('frameNum').textContent = currentFrame;
+  document.getElementById('frameTime').textContent = (currentFrame / fps).toFixed(4) + 's';
+}
+
+// ======== MARKS ========
+function markTakeoff() {
+  takeoffFrame = currentFrame;
+  updateMarkerUI();
+  autoCalc();
+}
+
+function markLanding() {
+  landingFrame = currentFrame;
+  updateMarkerUI();
+  autoCalc();
+}
+
+function clearMarks() {
+  takeoffFrame = null;
+  landingFrame = null;
+  updateMarkerUI();
+  clearResults();
+}
+
+function updateMarkerUI() {
+  const tbtn = document.getElementById('takeoffBtn');
+  const lbtn = document.getElementById('landingBtn');
+  const tlabel = document.getElementById('takeoffLabel');
+  const llabel = document.getElementById('landingLabel');
+  const clearEl = document.getElementById('clearMarks');
+
+  if (takeoffFrame !== null) {
+    tbtn.classList.add('set');
+    tlabel.textContent = 'Frame ' + takeoffFrame;
+  } else {
+    tbtn.classList.remove('set');
+    tlabel.textContent = '';
+  }
+
+  if (landingFrame !== null) {
+    lbtn.classList.add('set');
+    llabel.textContent = 'Frame ' + landingFrame;
+  } else {
+    lbtn.classList.remove('set');
+    llabel.textContent = '';
+  }
+
+  clearEl.style.display = (takeoffFrame !== null || landingFrame !== null) ? 'block' : 'none';
+
+  // Update scrubber markers
+  document.querySelectorAll('.marker').forEach(m => m.remove());
+  const wrap = document.getElementById('scrubberWrap');
+  if (takeoffFrame !== null && totalFrames > 0) {
+    const m = document.createElement('div');
+    m.className = 'marker takeoff';
+    m.style.left = (takeoffFrame / totalFrames * 100) + '%';
+    wrap.appendChild(m);
+  }
+  if (landingFrame !== null && totalFrames > 0) {
+    const m = document.createElement('div');
+    m.className = 'marker landing';
+    m.style.left = (landingFrame / totalFrames * 100) + '%';
+    wrap.appendChild(m);
+  }
+}
+
+// ======== CALCULATION ========
+function autoCalc() {
+  if (takeoffFrame !== null && landingFrame !== null && landingFrame > takeoffFrame) {
+    const frames = landingFrame - takeoffFrame;
+    const airTime = frames / fps;
+    const halfT = airTime / 2;
+    const heightIn = 0.5 * GRAVITY_IN * halfT * halfT;
+    const heightCm = heightIn * 2.54;
+    showResults(frames, airTime, heightIn, heightCm);
+  } else {
+    clearResults();
+  }
+}
+
+function showResults(frames, airTime, heightIn, heightCm) {
+  document.getElementById('resultsCard').style.display = 'block';
+  document.getElementById('resultHeight').textContent = heightIn.toFixed(1) + '″';
+  document.getElementById('resultHeightCm').textContent = heightCm.toFixed(1);
+  document.getElementById('resultAirTime').textContent = airTime.toFixed(4) + 's';
+  document.getElementById('resultFrames').textContent = frames;
+  document.getElementById('resultFps').textContent = fps;
+}
+
+function clearResults() {
+  document.getElementById('resultsCard').style.display = 'none';
+}
+
+// ======== LOG ========
+function logJump() {
+  const heightText = document.getElementById('resultHeight').textContent;
+  if (heightText === '—') return;
+
+  const frames = landingFrame - takeoffFrame;
+  const airTime = frames / fps;
+  const halfT = airTime / 2;
+  const heightIn = 0.5 * GRAVITY_IN * halfT * halfT;
+  const heightCm = heightIn * 2.54;
+  const label = document.getElementById('labelInput').value.trim();
+
+  const entry = {
+    id: Date.now().toString(),
+    timestamp: new Date().toISOString(),
+    fps: fps,
+    frames: frames,
+    airTime: airTime,
+    heightIn: heightIn,
+    heightCm: heightCm,
+    label: label || undefined
+  };
+
+  jumps.unshift(entry);
+  saveJumps();
+  document.getElementById('labelInput').value = '';
+  showToast('Jump logged — ' + heightIn.toFixed(1) + '″');
+}
+
+function deleteJump(id) {
+  jumps = jumps.filter(j => j.id !== id);
+  saveJumps();
+  renderLog();
+}
+
+function clearAllJumps() {
+  if (confirm('Delete all logged jumps?')) {
+    jumps = [];
+    saveJumps();
+    renderLog();
+  }
+}
+
+// ======== TOAST ========
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ======== TABS ========
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
+  document.getElementById('tab-analyze').style.display = tab === 'analyze' ? 'block' : 'none';
+  document.getElementById('tab-log').style.display = tab === 'log' ? 'block' : 'none';
+  document.getElementById('tab-trends').style.display = tab === 'trends' ? 'block' : 'none';
+  if (tab === 'log') renderLog();
+  if (tab === 'trends') renderTrends();
+}
+
+// ======== RENDER LOG ========
+function renderLog() {
+  const container = document.getElementById('logContent');
+  if (jumps.length === 0) {
+    container.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-text">No jumps logged yet.<br>Analyze a video and save your first jump!</div></div>';
+    return;
+  }
+
+  const todayKey = new Date().toISOString().split('T')[0];
+  const todayJumps = jumps.filter(j => j.timestamp.startsWith(todayKey));
+  const allAvg = jumps.reduce((s, j) => s + j.heightIn, 0) / jumps.length;
+  const allBest = Math.max(...jumps.map(j => j.heightIn));
+
+  let html = '';
+
+  // Today summary
+  if (todayJumps.length > 0) {
+    const todayAvg = todayJumps.reduce((s, j) => s + j.heightIn, 0) / todayJumps.length;
+    const todayBest = Math.max(...todayJumps.map(j => j.heightIn));
+    html += `<div class="card">
+      <div class="card-title">Today</div>
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-value">${todayJumps.length}</div><div class="stat-label">Jumps</div></div>
+        <div class="stat"><div class="stat-value highlight">${todayBest.toFixed(1)}″</div><div class="stat-label">Best</div></div>
+        <div class="stat"><div class="stat-value">${todayAvg.toFixed(1)}″</div><div class="stat-label">Average</div></div>
+      </div>
+    </div>`;
+  }
+
+  // All time
+  html += `<div class="card">
+    <div class="card-title">All Time</div>
+    <div class="stats-grid">
+      <div class="stat"><div class="stat-value">${jumps.length}</div><div class="stat-label">Jumps</div></div>
+      <div class="stat"><div class="stat-value highlight">${allBest.toFixed(1)}″</div><div class="stat-label">Best</div></div>
+      <div class="stat"><div class="stat-value">${allAvg.toFixed(1)}″</div><div class="stat-label">Average</div></div>
+    </div>
+  </div>`;
+
+  // History
+  html += `<div class="log-header"><h3>History</h3><button class="clear-all-btn" onclick="clearAllJumps()">Clear all</button></div>`;
+  jumps.forEach(j => {
+    const d = new Date(j.timestamp);
+    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    html += `<div class="jump-item">
+      <div>
+        <div class="jump-height">${j.heightIn.toFixed(1)}<span class="unit">″</span> <span style="font-size:13px;color:var(--text3);font-weight:400">${j.heightCm.toFixed(1)} cm</span></div>
+        <div class="jump-meta">${dateStr} ${timeStr} · ${j.airTime.toFixed(4)}s · ${j.frames}f@${j.fps}</div>
+        ${j.label ? '<div class="jump-label">' + escapeHtml(j.label) + '</div>' : ''}
+      </div>
+      <button class="delete-btn" onclick="deleteJump('${j.id}')">×</button>
+    </div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ======== RENDER TRENDS ========
+function renderTrends() {
+  const container = document.getElementById('trendsContent');
+
+  // Group by day
+  const days = {};
+  jumps.forEach(j => {
+    const key = j.timestamp.split('T')[0];
+    if (!days[key]) days[key] = [];
+    days[key].push(j);
+  });
+
+  const sortedDays = Object.keys(days).sort();
+  if (sortedDays.length < 2) {
+    container.innerHTML = '<div class="empty"><div class="empty-icon">📈</div><div class="empty-text">Log jumps across 2+ days<br>to see your trends.</div></div>';
+    return;
+  }
+
+  const dailyData = sortedDays.map(day => {
+    const dj = days[day];
+    const avg = dj.reduce((s, j) => s + j.heightIn, 0) / dj.length;
+    const best = Math.max(...dj.map(j => j.heightIn));
+    return { day, avg, best, count: dj.length };
+  });
+
+  // 7-day rolling avg
+  const trendData = dailyData.map((d, i) => {
+    const window7 = dailyData.slice(Math.max(0, i - 6), i + 1);
+    const rolling = window7.reduce((s, x) => s + x.avg, 0) / window7.length;
+    return { ...d, rolling7: rolling };
+  });
+
+  let html = '';
+
+  // Chart
+  html += `<div class="card">
+    <div class="card-title">Daily Best & Average (inches)</div>
+    <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--gold)"></div> Daily Best</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--blue)"></div> Daily Avg</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--green)"></div> 7-Day Rolling</div>
+    </div>
+  </div>`;
+
+  // Daily breakdown
+  html += `<div class="card"><div class="card-title">Daily Breakdown</div>`;
+  [...trendData].reverse().forEach(d => {
+    const dateLabel = new Date(d.day + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    html += `<div class="day-row">
+      <span class="day-date">${dateLabel}</span>
+      <span class="day-stats">
+        <span class="day-best">${d.best.toFixed(1)}″</span><span class="day-sep">·</span>
+        <span class="day-avg">${d.avg.toFixed(1)}″ avg</span><span class="day-sep">·</span>
+        <span class="day-count">${d.count}</span>
+      </span>
+    </div>`;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+
+  // Draw chart
+  requestAnimationFrame(() => drawChart(trendData));
+}
+
+function drawChart(data) {
+  const canvas = document.getElementById('trendChart');
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.max(data.length * 60, canvas.parentElement.clientWidth);
+  const H = 220;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 16, right: 16, bottom: 36, left: 36 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+
+  const allVals = data.flatMap(d => [d.best, d.avg, d.rolling7]);
+  const minV = Math.floor(Math.min(...allVals) - 1);
+  const maxV = Math.ceil(Math.max(...allVals) + 1);
+  const range = maxV - minV || 1;
+
+  const xStep = data.length > 1 ? cw / (data.length - 1) : cw;
+
+  function x(i) { return pad.left + i * xStep; }
+  function y(v) { return pad.top + ch - ((v - minV) / range) * ch; }
+
+  // Grid lines
+  ctx.strokeStyle = '#252d45';
+  ctx.lineWidth = 0.5;
+  const gridCount = 5;
+  for (let i = 0; i <= gridCount; i++) {
+    const val = minV + (range * i / gridCount);
+    const yy = y(val);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yy);
+    ctx.lineTo(W - pad.right, yy);
+    ctx.stroke();
+    ctx.fillStyle = '#4a5170';
+    ctx.font = '10px DM Sans, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(val.toFixed(0), pad.left - 6, yy + 3);
+  }
+
+  // X labels
+  ctx.fillStyle = '#4a5170';
+  ctx.font = '10px DM Sans, sans-serif';
+  ctx.textAlign = 'center';
+  data.forEach((d, i) => {
+    const dateLabel = new Date(d.day + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    ctx.fillText(dateLabel, x(i), H - pad.bottom + 20);
+  });
+
+  // Rolling 7 line (dashed)
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = '#2dd881';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    if (i === 0) ctx.moveTo(x(i), y(d.rolling7));
+    else ctx.lineTo(x(i), y(d.rolling7));
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Best line
+  ctx.strokeStyle = '#ffc44a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    if (i === 0) ctx.moveTo(x(i), y(d.best));
+    else ctx.lineTo(x(i), y(d.best));
+  });
+  ctx.stroke();
+
+  // Best dots
+  data.forEach((d, i) => {
+    ctx.beginPath();
+    ctx.arc(x(i), y(d.best), 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffc44a';
+    ctx.fill();
+  });
+
+  // Avg line
+  ctx.strokeStyle = '#4a8eff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    if (i === 0) ctx.moveTo(x(i), y(d.avg));
+    else ctx.lineTo(x(i), y(d.avg));
+  });
+  ctx.stroke();
+
+  // Avg dots
+  data.forEach((d, i) => {
+    ctx.beginPath();
+    ctx.arc(x(i), y(d.avg), 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#4a8eff';
+    ctx.fill();
+  });
+}
+
+// ======== KEYBOARD (for desktop use too) ========
+document.addEventListener('keydown', e => {
+  if (!videoLoaded) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); stepFrame(e.shiftKey ? -10 : -1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); stepFrame(e.shiftKey ? 10 : 1); }
+  if (e.key === 'a' || e.key === 'A') { e.preventDefault(); markTakeoff(); }
+  if (e.key === 'l' || e.key === 'L') { e.preventDefault(); markLanding(); }
+});
+
+// ======== CAMERA LAUNCH ========
+function openCamera() {
+  const tip = document.getElementById('sloMoTip');
+  tip.style.display = 'block';
+  // Scroll tip into view
+  tip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function dismissTip() {
+  document.getElementById('sloMoTip').style.display = 'none';
+}
+
+// ======== INIT ========
+loadJumps();
+</script>
+</body>
+</html>
