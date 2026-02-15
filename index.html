@@ -102,6 +102,8 @@
   .marker { position: absolute; top: 4px; width: 3px; height: 14px; border-radius: 2px; pointer-events: none; z-index: 2; }
   .marker.takeoff { background: var(--green); }
   .marker.landing { background: var(--red); }
+  .marker.contact-in { background: #ffa500; }
+  .marker.contact-out { background: #c882ff; }
 
   .step-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-bottom: 12px; }
   .step-btn {
@@ -122,6 +124,12 @@
   .mark-btn.landing { background: rgba(255,92,92,0.08); border-color: var(--red-dim); color: var(--red); }
   .mark-btn.landing:active { background: rgba(255,92,92,0.2); }
   .mark-btn.landing.set { background: rgba(255,92,92,0.15); border-color: var(--red); }
+  .mark-btn.contact-in { background: rgba(255,165,0,0.08); border-color: #5a3a10; color: #ffa500; }
+  .mark-btn.contact-in:active { background: rgba(255,165,0,0.2); }
+  .mark-btn.contact-in.set { background: rgba(255,165,0,0.15); border-color: #ffa500; }
+  .mark-btn.contact-out { background: rgba(200,130,255,0.08); border-color: #3a2060; color: #c882ff; }
+  .mark-btn.contact-out:active { background: rgba(200,130,255,0.2); }
+  .mark-btn.contact-out.set { background: rgba(200,130,255,0.15); border-color: #c882ff; }
   .mark-frame { display: block; font-family: 'JetBrains Mono', monospace; font-size: 11px; opacity: 0.7; margin-top: 2px; }
 
   .clear-link {
@@ -324,6 +332,7 @@
           <button class="step-btn" onclick="stepFrame(10)">+10</button>
         </div>
 
+        <div class="card-title" style="margin-top:4px">Air Time</div>
         <div class="mark-row">
           <button class="mark-btn takeoff" id="takeoffBtn" onclick="markTakeoff()">
             ▲ TAKEOFF
@@ -332,6 +341,18 @@
           <button class="mark-btn landing" id="landingBtn" onclick="markLanding()">
             ▼ LANDING
             <span class="mark-frame" id="landingLabel"></span>
+          </button>
+        </div>
+
+        <div class="card-title" style="margin-top:8px">Ground Contact <span style="font-size:9px;opacity:0.5;text-transform:none;letter-spacing:0">(optional)</span></div>
+        <div class="mark-row">
+          <button class="mark-btn contact-in" id="contactInBtn" onclick="markContactIn()">
+            ⬇ CONTACT IN
+            <span class="mark-frame" id="contactInLabel"></span>
+          </button>
+          <button class="mark-btn contact-out" id="contactOutBtn" onclick="markContactOut()">
+            ⬆ CONTACT OUT
+            <span class="mark-frame" id="contactOutLabel"></span>
           </button>
         </div>
         <button class="clear-link" id="clearMarks" style="display:none" onclick="clearMarks()">Clear marks</button>
@@ -359,6 +380,19 @@
           <div class="stat">
             <div class="stat-value" id="resultFps">—</div>
             <div class="stat-label">Capture FPS</div>
+          </div>
+        </div>
+        <div id="gctSection" style="display:none">
+          <div style="height:1px;background:var(--border);margin:8px 0 12px"></div>
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-value" id="resultGCT" style="color:#ffa500">—</div>
+              <div class="stat-label">Ground Contact</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" id="resultRSI" style="color:#c882ff">—</div>
+              <div class="stat-label">RSI</div>
+            </div>
           </div>
         </div>
         <div class="log-form">
@@ -532,12 +566,15 @@ function parseStts(dv, box) {
 var GRAVITY_IN = 386.0886;
 var captureFps = 240;
 var detectedPlaybackFps = null;
+var mp4TotalSamples = null;
 var frameInterval = 1/30;
 var currentFrame = 0;
 var totalFrames = 0;
 var duration = 0;
 var takeoffFrame = null;
 var landingFrame = null;
+var contactInFrame = null;
+var contactOutFrame = null;
 var jumps = [];
 var videoLoaded = false;
 
@@ -699,49 +736,71 @@ function handleFile(e) {
         presetsEl.style.display = 'flex';
       }
 
-      // Step 2: Detect playback frame rate
-      return detectFrameRate(video);
-    }).then(function(detected) {
-      if (detected && detected.fps > 0) {
-        detectedPlaybackFps = detected.fps;
-        frameInterval = detected.interval;
+      // Step 2: Determine total frames for stepping
+      // Use MP4 frame count as ground truth when available — it's always accurate
+      // Only fall back to requestVideoFrameCallback if MP4 parsing failed
+      var useMP4Frames = (mp4Info && mp4Info.totalSamples > 10);
+
+      if (useMP4Frames) {
+        mp4TotalSamples = mp4Info.totalSamples;
+        totalFrames = mp4TotalSamples;
+        frameInterval = duration / totalFrames;
+        detectedPlaybackFps = Math.round(1 / frameInterval);
+        finishVideoSetup();
       } else {
-        // Fallback: assume 30fps playback (standard iPhone slo-mo)
-        detectedPlaybackFps = 30;
-        frameInterval = 1 / 30;
+        // Fallback: detect playback rate
+        detectFrameRate(video).then(function(detected) {
+          if (detected && detected.fps > 0) {
+            detectedPlaybackFps = detected.fps;
+            frameInterval = detected.interval;
+          } else {
+            detectedPlaybackFps = 30;
+            frameInterval = 1 / 30;
+          }
+          totalFrames = Math.round(duration / frameInterval);
+          mp4TotalSamples = null;
+          finishVideoSetup();
+        });
       }
-
-      totalFrames = Math.round(duration / frameInterval);
-      scrubber.max = totalFrames;
-      scrubber.value = 0;
-      currentFrame = 0;
-      video.currentTime = 0;
-      video.pause();
-      videoLoaded = true;
-      takeoffFrame = null;
-      landingFrame = null;
-      clearResults();
-      updateFrameDisplay();
-      updateMarkerUI();
-
-      document.getElementById('videoArea').style.display = 'block';
-      document.getElementById('emptyAnalyze').style.display = 'none';
-      document.getElementById('totalFrames').textContent = totalFrames;
-
-      // Show detection info
-      var infoEl = document.getElementById('detectInfo');
-      var slowdown = captureFps / detectedPlaybackFps;
-      if (Math.abs(slowdown - 1) < 0.2) {
-        infoEl.innerHTML = 'Video plays at <strong>' + detectedPlaybackFps + 'fps</strong> (real time). Each frame = 1 real frame.';
-      } else {
-        infoEl.innerHTML = 'Detected <strong>' + detectedPlaybackFps + 'fps</strong> playback · <strong>' + slowdown.toFixed(1) + '× slow motion</strong> · Each step = 1 unique frame';
-      }
-      infoEl.style.display = 'block';
-      document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
-
-      hideLoading();
     });
   };
+}
+
+function finishVideoSetup() {
+  scrubber.max = totalFrames;
+  scrubber.value = 0;
+  currentFrame = 0;
+  video.currentTime = 0;
+  video.pause();
+  videoLoaded = true;
+  takeoffFrame = null;
+  landingFrame = null;
+  contactInFrame = null;
+  contactOutFrame = null;
+  clearResults();
+  updateFrameDisplay();
+  updateMarkerUI();
+
+  document.getElementById('videoArea').style.display = 'block';
+  document.getElementById('emptyAnalyze').style.display = 'none';
+  document.getElementById('totalFrames').textContent = totalFrames;
+
+  // Show detection info
+  var infoEl = document.getElementById('detectInfo');
+  if (mp4TotalSamples) {
+    infoEl.innerHTML = '<strong>' + totalFrames + '</strong> frames from file · Each step = 1 captured frame';
+  } else {
+    var slowdown = captureFps / detectedPlaybackFps;
+    if (Math.abs(slowdown - 1) < 0.2) {
+      infoEl.innerHTML = 'Video plays at <strong>' + detectedPlaybackFps + 'fps</strong> (real time). Each frame = 1 real frame.';
+    } else {
+      infoEl.innerHTML = 'Detected <strong>' + detectedPlaybackFps + 'fps</strong> playback \u00B7 <strong>' + slowdown.toFixed(1) + '\u00D7 slow motion</strong> \u00B7 Each step = 1 unique frame';
+    }
+  }
+  infoEl.style.display = 'block';
+  document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
+
+  hideLoading();
 }
 
 function setFpsPreset(val) {
@@ -755,18 +814,14 @@ function changeFps() {
   captureFps = val;
   document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
   document.getElementById('fpsPresets').style.display = 'none';
-  if (videoLoaded && detectedPlaybackFps) {
+  if (videoLoaded) {
     takeoffFrame = null;
     landingFrame = null;
+    contactInFrame = null;
+    contactOutFrame = null;
     clearResults();
     updateMarkerUI();
-    var infoEl = document.getElementById('detectInfo');
-    var slowdown = captureFps / detectedPlaybackFps;
-    if (Math.abs(slowdown - 1) < 0.2) {
-      infoEl.innerHTML = 'Video plays at <strong>' + detectedPlaybackFps + 'fps</strong> (real time).';
-    } else {
-      infoEl.innerHTML = 'Detected <strong>' + detectedPlaybackFps + 'fps</strong> playback · <strong>' + slowdown.toFixed(1) + '× slow motion</strong> · Each step = 1 unique frame';
-    }
+    updateFrameDisplay();
   }
 }
 
@@ -796,36 +851,56 @@ function updateFrameDisplay() {
 // ======== MARKS ========
 function markTakeoff() { takeoffFrame = currentFrame; updateMarkerUI(); autoCalc(); }
 function markLanding() { landingFrame = currentFrame; updateMarkerUI(); autoCalc(); }
-function clearMarks() { takeoffFrame = null; landingFrame = null; updateMarkerUI(); clearResults(); }
+function markContactIn() { contactInFrame = currentFrame; updateMarkerUI(); autoCalc(); }
+function markContactOut() { contactOutFrame = currentFrame; updateMarkerUI(); autoCalc(); }
+function clearMarks() {
+  takeoffFrame = null; landingFrame = null;
+  contactInFrame = null; contactOutFrame = null;
+  updateMarkerUI(); clearResults();
+}
 
 function updateMarkerUI() {
   var tbtn = document.getElementById('takeoffBtn');
   var lbtn = document.getElementById('landingBtn');
+  var cibtn = document.getElementById('contactInBtn');
+  var cobtn = document.getElementById('contactOutBtn');
   var tlabel = document.getElementById('takeoffLabel');
   var llabel = document.getElementById('landingLabel');
+  var cilabel = document.getElementById('contactInLabel');
+  var colabel = document.getElementById('contactOutLabel');
   var clearEl = document.getElementById('clearMarks');
 
   if (takeoffFrame !== null) { tbtn.classList.add('set'); tlabel.textContent = 'Frame ' + takeoffFrame; }
   else { tbtn.classList.remove('set'); tlabel.textContent = ''; }
   if (landingFrame !== null) { lbtn.classList.add('set'); llabel.textContent = 'Frame ' + landingFrame; }
   else { lbtn.classList.remove('set'); llabel.textContent = ''; }
-  clearEl.style.display = (takeoffFrame !== null || landingFrame !== null) ? 'block' : 'none';
+  if (contactInFrame !== null) { cibtn.classList.add('set'); cilabel.textContent = 'Frame ' + contactInFrame; }
+  else { cibtn.classList.remove('set'); cilabel.textContent = ''; }
+  if (contactOutFrame !== null) { cobtn.classList.add('set'); colabel.textContent = 'Frame ' + contactOutFrame; }
+  else { cobtn.classList.remove('set'); colabel.textContent = ''; }
+
+  var anyMarked = (takeoffFrame !== null || landingFrame !== null || contactInFrame !== null || contactOutFrame !== null);
+  clearEl.style.display = anyMarked ? 'block' : 'none';
 
   document.querySelectorAll('.marker').forEach(function(m) { m.remove(); });
   var wrap = document.getElementById('scrubberWrap');
-  if (takeoffFrame !== null && totalFrames > 0) {
-    var m = document.createElement('div'); m.className = 'marker takeoff';
-    m.style.left = (takeoffFrame / totalFrames * 100) + '%'; wrap.appendChild(m);
-  }
-  if (landingFrame !== null && totalFrames > 0) {
-    var m2 = document.createElement('div'); m2.className = 'marker landing';
-    m2.style.left = (landingFrame / totalFrames * 100) + '%'; wrap.appendChild(m2);
-  }
+  var allMarkers = [
+    { frame: contactInFrame, cls: 'contact-in' },
+    { frame: takeoffFrame, cls: 'takeoff' },
+    { frame: landingFrame, cls: 'landing' },
+    { frame: contactOutFrame, cls: 'contact-out' }
+  ];
+  allMarkers.forEach(function(mk) {
+    if (mk.frame !== null && totalFrames > 0) {
+      var m = document.createElement('div');
+      m.className = 'marker ' + mk.cls;
+      m.style.left = (mk.frame / totalFrames * 100) + '%';
+      wrap.appendChild(m);
+    }
+  });
 }
 
 // ======== CALCULATION ========
-// Key insight: each unique video frame = 1 real captured frame = 1/captureFps seconds of real time
-// The slo-mo stretching only affects playback time, not the frame-to-real-time mapping
 function autoCalc() {
   if (takeoffFrame !== null && landingFrame !== null && landingFrame > takeoffFrame) {
     var frameDiff = landingFrame - takeoffFrame;
@@ -833,19 +908,39 @@ function autoCalc() {
     var halfT = realAirTime / 2;
     var heightIn = 0.5 * GRAVITY_IN * halfT * halfT;
     var heightCm = heightIn * 2.54;
-    showResults(frameDiff, realAirTime, heightIn, heightCm);
+    var heightM = heightCm / 100;
+
+    // Ground contact time + RSI
+    var gct = null;
+    var rsi = null;
+    if (contactInFrame !== null && contactOutFrame !== null && contactOutFrame > contactInFrame) {
+      var gctFrames = contactOutFrame - contactInFrame;
+      gct = gctFrames / captureFps;
+      rsi = heightM / gct; // RSI = jump height (m) / ground contact time (s)
+    }
+
+    showResults(frameDiff, realAirTime, heightIn, heightCm, gct, rsi);
   } else {
     clearResults();
   }
 }
 
-function showResults(frames, airTime, heightIn, heightCm) {
+function showResults(frames, airTime, heightIn, heightCm, gct, rsi) {
   document.getElementById('resultsCard').style.display = 'block';
   document.getElementById('resultHeight').textContent = heightIn.toFixed(1) + '\u2033';
   document.getElementById('resultHeightCm').textContent = heightCm.toFixed(1);
   document.getElementById('resultAirTime').textContent = airTime.toFixed(4) + 's';
   document.getElementById('resultFrames').textContent = frames;
   document.getElementById('resultFps').textContent = captureFps;
+
+  var gctSection = document.getElementById('gctSection');
+  if (gct !== null && rsi !== null) {
+    gctSection.style.display = 'block';
+    document.getElementById('resultGCT').textContent = (gct * 1000).toFixed(0) + 'ms';
+    document.getElementById('resultRSI').textContent = rsi.toFixed(2);
+  } else {
+    gctSection.style.display = 'none';
+  }
 }
 
 function clearResults() { document.getElementById('resultsCard').style.display = 'none'; }
@@ -858,7 +953,16 @@ function logJump() {
   var halfT = realAirTime / 2;
   var heightIn = 0.5 * GRAVITY_IN * halfT * halfT;
   var heightCm = heightIn * 2.54;
+  var heightM = heightCm / 100;
   var label = document.getElementById('labelInput').value.trim();
+
+  var gct = null;
+  var rsi = null;
+  if (contactInFrame !== null && contactOutFrame !== null && contactOutFrame > contactInFrame) {
+    var gctFrames = contactOutFrame - contactInFrame;
+    gct = gctFrames / captureFps;
+    rsi = heightM / gct;
+  }
 
   var entry = {
     id: Date.now().toString(),
@@ -869,13 +973,17 @@ function logJump() {
     airTime: realAirTime,
     heightIn: heightIn,
     heightCm: heightCm,
+    gct: gct,
+    rsi: rsi,
     label: label || undefined
   };
 
   jumps.unshift(entry);
   saveJumps();
   document.getElementById('labelInput').value = '';
-  showToast('Jump logged \u2014 ' + heightIn.toFixed(1) + '\u2033');
+  var msg = 'Jump logged \u2014 ' + heightIn.toFixed(1) + '\u2033';
+  if (rsi !== null) msg += ' \u00B7 RSI ' + rsi.toFixed(2);
+  showToast(msg);
 }
 
 function deleteJump(id) { jumps = jumps.filter(function(j) { return j.id !== id; }); saveJumps(); renderLog(); }
@@ -942,7 +1050,10 @@ function renderLog() {
     var timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     html += '<div class="jump-item"><div>';
     html += '<div class="jump-height">' + j.heightIn.toFixed(1) + '<span class="unit">\u2033</span> <span style="font-size:13px;color:var(--text3);font-weight:400">' + j.heightCm.toFixed(1) + ' cm</span></div>';
-    html += '<div class="jump-meta">' + dateStr + ' ' + timeStr + ' · ' + j.airTime.toFixed(4) + 's · ' + j.frames + 'f@' + j.fps + '</div>';
+    html += '<div class="jump-meta">' + dateStr + ' ' + timeStr + ' \u00B7 ' + j.airTime.toFixed(4) + 's \u00B7 ' + j.frames + 'f@' + j.fps;
+    if (j.gct) html += ' \u00B7 GCT ' + (j.gct * 1000).toFixed(0) + 'ms';
+    if (j.rsi) html += ' \u00B7 RSI ' + j.rsi.toFixed(2);
+    html += '</div>';
     if (j.label) html += '<div class="jump-label">' + escapeHtml(j.label) + '</div>';
     html += '</div><button class="delete-btn" onclick="deleteJump(\'' + j.id + '\')">×</button></div>';
   });
@@ -1112,6 +1223,8 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'ArrowRight') { e.preventDefault(); stepFrame(e.shiftKey ? 10 : 1); }
   if (e.key === 'a' || e.key === 'A') { e.preventDefault(); markTakeoff(); }
   if (e.key === 'l' || e.key === 'L') { e.preventDefault(); markLanding(); }
+  if (e.key === 'c' || e.key === 'C') { e.preventDefault(); markContactIn(); }
+  if (e.key === 'o' || e.key === 'O') { e.preventDefault(); markContactOut(); }
 });
 
 // ======== INIT ========
