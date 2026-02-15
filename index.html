@@ -181,6 +181,15 @@
     padding: 8px 12px; margin-bottom: 12px; font-size: 11px; color: var(--gold); line-height: 1.5;
   }
   .fps-hint strong { color: #fff; }
+  .fps-presets {
+    display: flex; gap: 8px; margin-bottom: 12px; justify-content: center;
+  }
+  .preset-btn {
+    padding: 8px 18px; border: 1px solid var(--gold-dim); border-radius: 8px;
+    background: rgba(255,196,74,0.08); color: var(--gold); font-family: 'JetBrains Mono', monospace;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .preset-btn:active { background: rgba(255,196,74,0.2); }
 
   .slo-mo-tip {
     background: rgba(255,196,74,0.1); border: 1px solid var(--gold-dim); border-radius: 10px;
@@ -271,6 +280,12 @@
     </div>
     <div class="fps-hint" id="fpsHint">
       💡 Check actual FPS in <strong>Photos → ⓘ</strong> — iPhones often capture below 240fps in lower light.
+    </div>
+    <div class="fps-presets" id="fpsPresets" style="display:none">
+      <button class="preset-btn" onclick="setFpsPreset(120)">120</button>
+      <button class="preset-btn" onclick="setFpsPreset(180)">180</button>
+      <button class="preset-btn" onclick="setFpsPreset(240)">240</button>
+      <button class="preset-btn" onclick="setFpsPreset(480)">480</button>
     </div>
     <div class="slo-mo-tip" id="sloMoTip" style="display:none">
       <span class="tip-dismiss" onclick="dismissTip()">×</span>
@@ -371,7 +386,7 @@
 
 <script>
 // ======== MP4 METADATA PARSER ========
-// Parses the MP4 container to extract actual capture frame rate from stts + mdhd boxes
+// Parses the MP4 container to extract frame count and timing info
 function parseMP4ForFps(file) {
   return new Promise(function(resolve) {
     var reader = new FileReader();
@@ -380,35 +395,33 @@ function parseMP4ForFps(file) {
         var buffer = new DataView(e.target.result);
         var result = findVideoTrackInfo(buffer, 0, buffer.byteLength);
         if (result && result.timescale && result.sampleDurations.length > 0) {
-          // Find the most common (shortest) duration — this is the high-fps capture rate
-          // iPhone slo-mo has variable rate: some frames at normal speed, most at high speed
-          var durationCounts = {};
           var totalSamples = 0;
+          var totalTicks = 0;
           result.sampleDurations.forEach(function(entry) {
-            var key = entry.duration.toString();
-            if (!durationCounts[key]) durationCounts[key] = 0;
-            durationCounts[key] += entry.count;
             totalSamples += entry.count;
+            totalTicks += entry.count * entry.duration;
           });
 
-          // The shortest duration = highest fps = the slo-mo capture rate
-          var shortestDuration = Infinity;
-          var shortestCount = 0;
-          result.sampleDurations.forEach(function(entry) {
-            if (entry.duration < shortestDuration) {
-              shortestDuration = entry.duration;
-              shortestCount = entry.count;
-            }
-          });
+          var mediaDurationSec = totalTicks / result.timescale;
+          var naiveFps = result.timescale / result.sampleDurations[0].duration;
 
-          var captureRate = result.timescale / shortestDuration;
-          // Round to 2 decimal places
-          captureRate = Math.round(captureRate * 100) / 100;
+          // Check for common Apple timescale artifacts
+          // If naive fps equals the timescale (all durations = 1), it's likely
+          // an Apple slo-mo file using the timescale as a time base, not real fps
+          var isTimescaleArtifact = (
+            Math.abs(naiveFps - result.timescale) < 1 ||
+            result.timescale === 600 ||
+            result.timescale === 6000 ||
+            result.timescale === 60000
+          );
 
           resolve({
-            fps: captureRate,
+            totalSamples: totalSamples,
+            totalTicks: totalTicks,
             timescale: result.timescale,
-            totalFrames: totalSamples,
+            mediaDurationSec: mediaDurationSec,
+            naiveFps: naiveFps,
+            isTimescaleArtifact: isTimescaleArtifact,
             sampleDurations: result.sampleDurations
           });
         } else {
@@ -419,8 +432,7 @@ function parseMP4ForFps(file) {
       }
     };
     reader.onerror = function() { resolve(null); };
-    // Read first 8MB — metadata is usually at the start or we need moov box
-    var slice = file.slice(0, Math.min(file.size, 8 * 1024 * 1024));
+    var slice = file.slice(0, Math.min(file.size, 12 * 1024 * 1024));
     reader.readAsArrayBuffer(slice);
   });
 }
@@ -622,21 +634,69 @@ function handleFile(e) {
     videoLoaded = false;
     showLoading('Analyzing video...');
 
-    // Step 1: Extract capture FPS from MP4 metadata
+    // Step 1: Extract frame info from MP4 metadata
     parseMP4ForFps(file).then(function(mp4Info) {
-      if (mp4Info && mp4Info.fps > 1 && mp4Info.fps < 1000) {
-        captureFps = mp4Info.fps;
-        document.getElementById('fpsInput').value = captureFps;
-        document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
-        document.getElementById('fpsHint').innerHTML = '\u2705 Auto-detected <strong>' + captureFps + ' fps</strong> capture rate from file metadata.';
-        document.getElementById('fpsHint').style.borderColor = 'rgba(45,216,129,0.2)';
-        document.getElementById('fpsHint').style.background = 'rgba(45,216,129,0.08)';
-        document.getElementById('fpsHint').style.color = 'var(--green)';
+      var hintEl = document.getElementById('fpsHint');
+      var presetsEl = document.getElementById('fpsPresets');
+      presetsEl.style.display = 'none';
+
+      if (mp4Info && mp4Info.totalSamples > 0) {
+        // Cross-reference: total frames from file / video duration from browser
+        // This gives AVERAGE fps across the whole clip
+        var avgFps = mp4Info.totalSamples / duration;
+        avgFps = Math.round(avgFps * 100) / 100;
+
+        // Standard slo-mo capture rates
+        var sloMoRates = [120, 240, 480, 960];
+
+        // Check if avgFps is exactly (or very close to) a standard rate
+        var exactMatch = sloMoRates.find(function(r) { return Math.abs(avgFps - r) < 2; });
+
+        // Check if avgFps falls BETWEEN standard rates (indicates normal-speed bookends)
+        // e.g., 180.72 is between 120 and 240 → slo-mo section is 240fps
+        var inferredRate = null;
+        if (!exactMatch && avgFps > 60) {
+          // Find the nearest standard rate ABOVE the average
+          for (var i = 0; i < sloMoRates.length; i++) {
+            if (avgFps < sloMoRates[i]) {
+              inferredRate = sloMoRates[i];
+              break;
+            }
+          }
+        }
+
+        if (exactMatch) {
+          // Average matches a standard rate — no bookends or very short ones
+          captureFps = exactMatch;
+          document.getElementById('fpsInput').value = captureFps;
+          document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
+          hintEl.innerHTML = '\u2705 Detected <strong>' + captureFps + ' fps</strong> capture rate.';
+          hintEl.style.borderColor = 'rgba(45,216,129,0.2)';
+          hintEl.style.background = 'rgba(45,216,129,0.08)';
+          hintEl.style.color = 'var(--green)';
+        } else if (inferredRate) {
+          // Average is between standard rates → infer slo-mo section rate
+          captureFps = inferredRate;
+          document.getElementById('fpsInput').value = captureFps;
+          document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
+          hintEl.innerHTML = '\u2705 Set to <strong>' + inferredRate + ' fps</strong> (file averaged ' + avgFps + ' fps due to normal-speed bookends). If your camera was set differently, adjust above.';
+          hintEl.style.borderColor = 'rgba(45,216,129,0.2)';
+          hintEl.style.background = 'rgba(45,216,129,0.08)';
+          hintEl.style.color = 'var(--green)';
+        } else {
+          // Can't determine — show presets
+          hintEl.innerHTML = '\u26A0\uFE0F Could not determine slo-mo rate. Check your camera setting or <strong>Photos \u2192 \u24D8</strong> and enter FPS above:';
+          hintEl.style.borderColor = 'rgba(255,196,74,0.15)';
+          hintEl.style.background = 'rgba(255,196,74,0.08)';
+          hintEl.style.color = 'var(--gold)';
+          presetsEl.style.display = 'flex';
+        }
       } else {
-        document.getElementById('fpsHint').innerHTML = '\u26A0\uFE0F Could not read FPS from file. Check in <strong>Photos \u2192 \u24D8</strong> and enter it above.';
-        document.getElementById('fpsHint').style.borderColor = 'rgba(255,196,74,0.15)';
-        document.getElementById('fpsHint').style.background = 'rgba(255,196,74,0.08)';
-        document.getElementById('fpsHint').style.color = 'var(--gold)';
+        hintEl.innerHTML = '\u26A0\uFE0F Could not read metadata. Check <strong>Photos \u2192 \u24D8</strong> for FPS and enter it above.';
+        hintEl.style.borderColor = 'rgba(255,196,74,0.15)';
+        hintEl.style.background = 'rgba(255,196,74,0.08)';
+        hintEl.style.color = 'var(--gold)';
+        presetsEl.style.display = 'flex';
       }
 
       // Step 2: Detect playback frame rate
@@ -684,11 +744,17 @@ function handleFile(e) {
   };
 }
 
+function setFpsPreset(val) {
+  document.getElementById('fpsInput').value = val;
+  changeFps();
+}
+
 function changeFps() {
   var val = parseFloat(document.getElementById('fpsInput').value);
   if (!val || val <= 0) return;
   captureFps = val;
   document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
+  document.getElementById('fpsPresets').style.display = 'none';
   if (videoLoaded && detectedPlaybackFps) {
     takeoffFrame = null;
     landingFrame = null;
