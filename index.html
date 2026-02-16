@@ -252,6 +252,12 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  .meta-debug {
+    font-size: 0.65rem; color: var(--text3); background: rgba(0,0,0,0.3);
+    padding: 8px; border-radius: 6px; margin-top: 6px; white-space: pre-wrap;
+    word-break: break-all; line-height: 1.4; font-family: 'SF Mono', monospace;
+  }
+
   .loading-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(10,14,26,0.85); display: flex; align-items: center; justify-content: center;
@@ -678,51 +684,101 @@ function handleFile(e) {
       presetsEl.style.display = 'none';
 
       if (mp4Info && mp4Info.totalSamples > 0) {
-        // Cross-reference: total frames from file / video duration from browser
-        // This gives AVERAGE fps across the whole clip
+        // ---- SMART FPS DETECTION FROM STTS ENTRIES ----
+        // The stts box tells us exactly how long each frame is in timescale units.
+        // Multiple entries with different durations = variable frame rate (VFR)
+        // e.g., iPhone slo-mo with normal-speed bookends
+
         var avgFps = mp4Info.totalSamples / duration;
         avgFps = Math.round(avgFps * 100) / 100;
+        var ts = mp4Info.timescale;
+        var entries = mp4Info.sampleDurations;
 
-        // Standard slo-mo capture rates
-        var sloMoRates = [120, 240, 480, 960];
+        // Compute fps for each stts entry
+        var entryRates = entries.map(function(e) {
+          return {
+            count: e.count,
+            duration: e.duration,
+            fps: Math.round((ts / e.duration) * 100) / 100
+          };
+        });
 
-        // Check if avgFps is exactly (or very close to) a standard rate
-        var exactMatch = sloMoRates.find(function(r) { return Math.abs(avgFps - r) < 2; });
+        // Check for constant vs variable frame rate
+        var uniqueDurations = [];
+        entries.forEach(function(e) {
+          if (uniqueDurations.indexOf(e.duration) === -1) uniqueDurations.push(e.duration);
+        });
+        var isVFR = uniqueDurations.length > 1;
 
-        // Check if avgFps falls BETWEEN standard rates (indicates normal-speed bookends)
-        // e.g., 180.72 is between 120 and 240 → slo-mo section is 240fps
-        var inferredRate = null;
-        if (!exactMatch && avgFps > 60) {
-          // Find the nearest standard rate ABOVE the average
-          for (var i = 0; i < sloMoRates.length; i++) {
-            if (avgFps < sloMoRates[i]) {
-              inferredRate = sloMoRates[i];
-              break;
-            }
+        // Find the slo-mo section: the entry with the SHORTEST duration (highest fps)
+        // and the most frames at that rate
+        var sloMoEntry = null;
+        var sloMoFps = 0;
+        var sloMoFrameCount = 0;
+        entryRates.forEach(function(e) {
+          if (e.fps > sloMoFps) {
+            sloMoFps = e.fps;
+            sloMoEntry = e;
+            sloMoFrameCount = e.count;
+          } else if (e.fps === sloMoFps) {
+            sloMoFrameCount += e.count;
           }
+        });
+
+        // Filter out timescale artifacts: if the computed fps equals the timescale,
+        // all durations are 1 and it's a timescale encoding, not real fps
+        var isArtifact = (
+          sloMoFps > 500 && Math.abs(sloMoFps - ts) < 2
+        ) || (ts === 600 && sloMoFps > 500);
+
+        // Build metadata debug string
+        var metaLines = ['Timescale: ' + ts];
+        entryRates.forEach(function(e, i) {
+          metaLines.push('Entry ' + (i+1) + ': ' + e.count + ' frames @ ' + e.fps + ' fps (dur=' + e.duration + ')');
+        });
+        metaLines.push('Total: ' + mp4Info.totalSamples + ' frames, avg ' + avgFps + ' fps');
+        metaLines.push('Duration: ' + duration.toFixed(4) + 's');
+        metaLines.push(isVFR ? 'Variable frame rate (VFR)' : 'Constant frame rate (CFR)');
+        var metaDebug = metaLines.join('\n');
+
+        var detectedFps = null;
+        var confidence = '';
+
+        if (isArtifact) {
+          // Timescale artifact — fall back to avgFps
+          detectedFps = avgFps;
+          confidence = 'avg';
+        } else if (!isVFR) {
+          // Constant frame rate: use the single rate directly
+          detectedFps = sloMoFps;
+          confidence = 'exact';
+        } else {
+          // Variable frame rate: slo-mo section has highest fps
+          // Use the slo-mo rate for frames in that section
+          detectedFps = sloMoFps;
+          confidence = 'vfr-slomo';
         }
 
-        if (exactMatch) {
-          // Average matches a standard rate — no bookends or very short ones
-          captureFps = exactMatch;
-          document.getElementById('fpsInput').value = captureFps;
-          document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
-          hintEl.innerHTML = '\u2705 Detected <strong>' + captureFps + ' fps</strong> capture rate.';
+        // Round to nearest 0.01
+        detectedFps = Math.round(detectedFps * 100) / 100;
+
+        captureFps = detectedFps;
+        document.getElementById('fpsInput').value = captureFps;
+        document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
+
+        if (confidence === 'exact') {
+          hintEl.innerHTML = '\u2705 Detected <strong>' + captureFps + ' fps</strong> capture rate (constant). <a href="#" onclick="toggleMeta(event)" style="color:var(--text3);font-size:0.75rem">details</a><pre class="meta-debug" id="metaDebug" style="display:none">' + metaDebug + '</pre>';
           hintEl.style.borderColor = 'rgba(45,216,129,0.2)';
           hintEl.style.background = 'rgba(45,216,129,0.08)';
           hintEl.style.color = 'var(--green)';
-        } else if (inferredRate) {
-          // Average is between standard rates → infer slo-mo section rate
-          captureFps = inferredRate;
-          document.getElementById('fpsInput').value = captureFps;
-          document.getElementById('badgeLabel').textContent = captureFps + ' FPS';
-          hintEl.innerHTML = '\u2705 Set to <strong>' + inferredRate + ' fps</strong> (file averaged ' + avgFps + ' fps due to normal-speed bookends). If your camera was set differently, adjust above.';
+        } else if (confidence === 'vfr-slomo') {
+          hintEl.innerHTML = '\u2705 Variable rate file — slo-mo section: <strong>' + sloMoFps + ' fps</strong> (' + sloMoFrameCount + ' frames). Bookend sections at different rate. <a href="#" onclick="toggleMeta(event)" style="color:var(--text3);font-size:0.75rem">details</a><pre class="meta-debug" id="metaDebug" style="display:none">' + metaDebug + '</pre>';
           hintEl.style.borderColor = 'rgba(45,216,129,0.2)';
           hintEl.style.background = 'rgba(45,216,129,0.08)';
           hintEl.style.color = 'var(--green)';
         } else {
-          // Can't determine — show presets
-          hintEl.innerHTML = '\u26A0\uFE0F Could not determine slo-mo rate. Check your camera setting or <strong>Photos \u2192 \u24D8</strong> and enter FPS above:';
+          // Artifact fallback — use avgFps but warn
+          hintEl.innerHTML = '\u26A0\uFE0F Timescale artifact detected (ts=' + ts + '). Using average: <strong>' + captureFps + ' fps</strong>. Verify and adjust if needed. <a href="#" onclick="toggleMeta(event)" style="color:var(--text3);font-size:0.75rem">details</a><pre class="meta-debug" id="metaDebug" style="display:none">' + metaDebug + '</pre>';
           hintEl.style.borderColor = 'rgba(255,196,74,0.15)';
           hintEl.style.background = 'rgba(255,196,74,0.08)';
           hintEl.style.color = 'var(--gold)';
@@ -823,6 +879,12 @@ function changeFps() {
     updateMarkerUI();
     updateFrameDisplay();
   }
+}
+
+function toggleMeta(e) {
+  e.preventDefault();
+  var el = document.getElementById('metaDebug');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 // ======== FRAME NAVIGATION ========
