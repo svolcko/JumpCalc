@@ -429,11 +429,17 @@
 // Parses the MP4 container to extract frame count and timing info
 function parseMP4ForFps(file) {
   return new Promise(function(resolve) {
-    var reader = new FileReader();
-    reader.onload = function(e) {
+    // Strategy: First scan top-level box headers to find moov location,
+    // then do a targeted read of just the moov box.
+    // iPhone slo-mo files can be 500MB+ with moov at the END.
+
+    var HEADER_SCAN_SIZE = 64 * 1024; // 64KB to scan top-level boxes
+    var MAX_MOOV_READ = 50 * 1024 * 1024; // 50MB max moov read
+
+    function processBuffer(buffer) {
       try {
-        var buffer = new DataView(e.target.result);
-        var result = findVideoTrackInfo(buffer, 0, buffer.byteLength);
+        var dv = new DataView(buffer);
+        var result = findVideoTrackInfo(dv, 0, dv.byteLength);
         if (result && result.timescale && result.sampleDurations.length > 0) {
           var totalSamples = 0;
           var totalTicks = 0;
@@ -441,21 +447,15 @@ function parseMP4ForFps(file) {
             totalSamples += entry.count;
             totalTicks += entry.count * entry.duration;
           });
-
           var mediaDurationSec = totalTicks / result.timescale;
           var naiveFps = result.timescale / result.sampleDurations[0].duration;
-
-          // Check for common Apple timescale artifacts
-          // If naive fps equals the timescale (all durations = 1), it's likely
-          // an Apple slo-mo file using the timescale as a time base, not real fps
           var isTimescaleArtifact = (
             Math.abs(naiveFps - result.timescale) < 1 ||
             result.timescale === 600 ||
             result.timescale === 6000 ||
             result.timescale === 60000
           );
-
-          resolve({
+          return {
             totalSamples: totalSamples,
             totalTicks: totalTicks,
             timescale: result.timescale,
@@ -463,17 +463,102 @@ function parseMP4ForFps(file) {
             naiveFps: naiveFps,
             isTimescaleArtifact: isTimescaleArtifact,
             sampleDurations: result.sampleDurations
-          });
-        } else {
-          resolve(null);
+          };
         }
-      } catch (err) {
-        resolve(null);
+      } catch(e) {}
+      return null;
+    }
+
+    function scanTopLevelBoxes(dv) {
+      // Scan top-level box headers to find moov offset and size
+      var pos = 0;
+      var boxes = [];
+      while (pos < dv.byteLength - 8) {
+        var size = dv.getUint32(pos);
+        var type = '';
+        try {
+          type = String.fromCharCode(dv.getUint8(pos+4), dv.getUint8(pos+5), dv.getUint8(pos+6), dv.getUint8(pos+7));
+        } catch(e) { break; }
+
+        if (size < 8) break;
+
+        // Handle 64-bit extended size
+        var realSize = size;
+        if (size === 1 && pos + 16 <= dv.byteLength) {
+          // 64-bit size: read as two 32-bit ints
+          var hi = dv.getUint32(pos + 8);
+          var lo = dv.getUint32(pos + 12);
+          realSize = hi * 4294967296 + lo;
+        }
+
+        boxes.push({ type: type, offset: pos, size: realSize });
+        if (type === 'moov') return { found: true, offset: pos, size: realSize, boxes: boxes };
+        pos += realSize;
+      }
+      return { found: false, boxes: boxes };
+    }
+
+    // Step 1: Read beginning to scan box headers
+    var headerSlice = file.slice(0, Math.min(file.size, HEADER_SCAN_SIZE));
+    var headerReader = new FileReader();
+    headerReader.onload = function(e) {
+      var headerDv = new DataView(e.target.result);
+      var scan = scanTopLevelBoxes(headerDv);
+
+      if (scan.found) {
+        // moov is near the start — read it directly
+        var moovEnd = Math.min(scan.offset + scan.size, file.size);
+        var readSize = Math.min(scan.size, MAX_MOOV_READ);
+        var moovSlice = file.slice(scan.offset, scan.offset + readSize);
+        var moovReader = new FileReader();
+        moovReader.onload = function(e2) {
+          // We need to wrap moov in a buffer that findVideoTrackInfo can parse
+          // It expects to find 'moov' box, so we read from moov start
+          resolve(processBuffer(e2.target.result));
+        };
+        moovReader.onerror = function() { resolve(null); };
+        moovReader.readAsArrayBuffer(moovSlice);
+      } else {
+        // moov not in first 64KB — likely at end of file (iPhone recording)
+        // Calculate how much of the end to read
+        // Use the box scan to estimate: total file size minus known box sizes
+        var knownEnd = 0;
+        scan.boxes.forEach(function(b) { knownEnd = Math.max(knownEnd, b.offset + b.size); });
+
+        // If we could determine total size of preceding boxes, moov starts there
+        // Otherwise read the last chunk generously
+        var tailSize = Math.min(file.size, MAX_MOOV_READ);
+        if (knownEnd > 0 && knownEnd < file.size) {
+          // We know where preceding boxes end, so moov starts around there
+          tailSize = Math.min(file.size - knownEnd + 1024, MAX_MOOV_READ);
+        }
+
+        var tailStart = Math.max(0, file.size - tailSize);
+        var tailSlice = file.slice(tailStart, file.size);
+        var tailReader = new FileReader();
+        tailReader.onload = function(e2) {
+          var result = processBuffer(e2.target.result);
+          if (result) {
+            resolve(result);
+          } else {
+            // Last resort: try reading more from the end
+            if (tailSize < file.size && tailSize < MAX_MOOV_READ) {
+              var bigSlice = file.slice(0, Math.min(file.size, MAX_MOOV_READ));
+              var bigReader = new FileReader();
+              bigReader.onload = function(e3) { resolve(processBuffer(e3.target.result)); };
+              bigReader.onerror = function() { resolve(null); };
+              bigReader.readAsArrayBuffer(bigSlice);
+            } else {
+              resolve(null);
+            }
+          }
+        };
+        tailReader.onerror = function() { resolve(null); };
+        tailReader.readAsArrayBuffer(tailSlice);
       }
     };
-    reader.onerror = function() { resolve(null); };
-    var slice = file.slice(0, Math.min(file.size, 12 * 1024 * 1024));
-    reader.readAsArrayBuffer(slice);
+    headerReader.onerror = function() { resolve(null); };
+    headerReader.readAsArrayBuffer(headerSlice);
   });
 }
 
@@ -675,7 +760,8 @@ function handleFile(e) {
   video.onloadedmetadata = function() {
     duration = video.duration;
     videoLoaded = false;
-    showLoading('Analyzing video...');
+    var sizeMB = (file.size / (1024*1024)).toFixed(0);
+    showLoading('Analyzing video' + (sizeMB > 50 ? ' (' + sizeMB + ' MB — finding metadata...)' : '...'));
 
     // Step 1: Extract frame info from MP4 metadata
     parseMP4ForFps(file).then(function(mp4Info) {
@@ -710,20 +796,46 @@ function handleFile(e) {
         });
         var isVFR = uniqueDurations.length > 1;
 
-        // Find the slo-mo section: the entry with the SHORTEST duration (highest fps)
-        // and the most frames at that rate
-        var sloMoEntry = null;
-        var sloMoFps = 0;
-        var sloMoFrameCount = 0;
+        // Group entries by similar fps (within 15% of each other) to handle encoder jitter
+        // e.g., dur=19 (31.58fps) and dur=20 (30fps) are the same rate — just jitter
+        var groups = []; // { fps: weighted avg, totalFrames: N, entries: [...] }
         entryRates.forEach(function(e) {
-          if (e.fps > sloMoFps) {
-            sloMoFps = e.fps;
-            sloMoEntry = e;
-            sloMoFrameCount = e.count;
-          } else if (e.fps === sloMoFps) {
-            sloMoFrameCount += e.count;
+          var matched = false;
+          for (var g = 0; g < groups.length; g++) {
+            var ratio = e.fps / groups[g].fps;
+            if (ratio > 0.85 && ratio < 1.15) {
+              // Same group — update weighted average
+              var oldTotal = groups[g].totalFrames;
+              groups[g].totalFrames += e.count;
+              groups[g].fps = (groups[g].fps * oldTotal + e.fps * e.count) / groups[g].totalFrames;
+              groups[g].entries.push(e);
+              matched = true;
+              break;
+            }
+          }
+          if (!matched) {
+            groups.push({ fps: e.fps, totalFrames: e.count, entries: [e] });
           }
         });
+
+        // Sort groups by fps descending
+        groups.sort(function(a, b) { return b.fps - a.fps; });
+
+        // Find slo-mo group: highest fps group with substantial frame count
+        // Ignore groups with < 10 frames (jitter artifacts)
+        var sloMoGroup = null;
+        var normalGroup = null;
+        for (var g = 0; g < groups.length; g++) {
+          if (groups[g].totalFrames >= 10) {
+            if (!sloMoGroup) sloMoGroup = groups[g];
+            else if (!normalGroup) normalGroup = groups[g];
+          }
+        }
+
+        // If slo-mo and normal groups exist and are significantly different (2x+), it's real VFR
+        var hasRealSloMo = sloMoGroup && normalGroup && (sloMoGroup.fps / normalGroup.fps > 1.8);
+        var sloMoFps = sloMoGroup ? Math.round(sloMoGroup.fps * 100) / 100 : avgFps;
+        var sloMoFrameCount = sloMoGroup ? sloMoGroup.totalFrames : mp4Info.totalSamples;
 
         // Filter out timescale artifacts: if the computed fps equals the timescale,
         // all durations are 1 and it's a timescale encoding, not real fps
@@ -736,9 +848,18 @@ function handleFile(e) {
         entryRates.forEach(function(e, i) {
           metaLines.push('Entry ' + (i+1) + ': ' + e.count + ' frames @ ' + e.fps + ' fps (dur=' + e.duration + ')');
         });
+        if (entryRates.length > 20) {
+          metaLines = ['Timescale: ' + ts, '(' + entryRates.length + ' stts entries — showing groups)'];
+        }
+        metaLines.push('---');
+        groups.forEach(function(g, i) {
+          metaLines.push('Group ' + (i+1) + ': ~' + Math.round(g.fps) + ' fps (' + g.totalFrames + ' frames)');
+        });
+        metaLines.push('---');
         metaLines.push('Total: ' + mp4Info.totalSamples + ' frames, avg ' + avgFps + ' fps');
         metaLines.push('Duration: ' + duration.toFixed(4) + 's');
         metaLines.push(isVFR ? 'Variable frame rate (VFR)' : 'Constant frame rate (CFR)');
+        if (hasRealSloMo) metaLines.push('Slo-mo section: ~' + Math.round(sloMoFps) + ' fps (' + sloMoFrameCount + ' frames)');
         var metaDebug = metaLines.join('\n');
 
         var detectedFps = null;
@@ -748,13 +869,13 @@ function handleFile(e) {
           // Timescale artifact — fall back to avgFps
           detectedFps = avgFps;
           confidence = 'avg';
-        } else if (!isVFR) {
-          // Constant frame rate: use the single rate directly
+        } else if (!isVFR || !hasRealSloMo) {
+          // Constant frame rate, or VFR but just jitter (no real slo-mo section)
+          // Use the dominant rate
           detectedFps = sloMoFps;
-          confidence = 'exact';
+          confidence = hasRealSloMo ? 'vfr-slomo' : 'exact';
         } else {
-          // Variable frame rate: slo-mo section has highest fps
-          // Use the slo-mo rate for frames in that section
+          // Real VFR with distinct slo-mo section
           detectedFps = sloMoFps;
           confidence = 'vfr-slomo';
         }
